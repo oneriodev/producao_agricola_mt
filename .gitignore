@@ -1,0 +1,14 @@
+# Ambiente virtual
+.venv/
+
+# Cache do Python
+__pycache__/
+*.pyc
+
+# Variáveis de ambiente (senhas!)
+.env
+
+# Dados gerados (podem ser recriados rodando o pipeline)
+data/raw/*
+data/processed/*
+!data/**/.gitkeep
