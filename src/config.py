@@ -1,18 +1,53 @@
 """
 Configurações centrais do projeto.
 
-Lê as variáveis do arquivo .env e monta a URL de conexão com o PostgreSQL.
-Os outros módulos (load.py, app.py) importam daqui, assim a configuração
-fica em um único lugar.
+Tudo que pode mudar (códigos do IBGE, caminhos, conexão com o banco)
+fica aqui. Os outros módulos importam deste arquivo, assim cada
+configuração existe em um único lugar.
 """
 
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 from sqlalchemy import URL
 
 # Procura o arquivo .env (subindo pelas pastas) e carrega suas variáveis
 load_dotenv()
+
+# --- Caminhos ---------------------------------------------------------------
+# __file__ = este arquivo (src/config.py). Subindo 2 níveis chegamos à raiz.
+BASE_DIR = Path(__file__).resolve().parent.parent
+RAW_DIR = BASE_DIR / "data" / "raw"              # dados brutos da API
+PROCESSED_DIR = BASE_DIR / "data" / "processed"  # dados tratados
+
+# --- API SIDRA / IBGE -------------------------------------------------------
+# Documentação da tabela: https://apisidra.ibge.gov.br/desctabapi.aspx?c=5457
+SIDRA_BASE_URL = "https://apisidra.ibge.gov.br/values"
+SIDRA_TABELA = "5457"        # PAM - lavouras temporárias e permanentes
+SIDRA_CLASSIFICACAO = "782"  # classificação "Produto das lavouras"
+UF_CODIGO = "51"             # código IBGE de Mato Grosso
+PERIODO = "last 16"          # últimos 16 anos disponíveis (2010 a 2025)
+
+# Variáveis: código SIDRA -> descrição
+VARIAVEIS = {
+    "8331": "Área plantada (ha)",
+    "216": "Área colhida (ha)",
+    "214": "Quantidade produzida (t)",
+    "112": "Rendimento médio (kg/ha)",
+    "215": "Valor da produção (mil R$)",
+}
+
+# Produtos: código SIDRA -> nome
+PRODUTOS = {
+    "40124": "Soja",
+    "40122": "Milho",
+    "40099": "Algodão herbáceo",
+    "40106": "Cana-de-açúcar",
+    "40112": "Feijão",
+    "40102": "Arroz",
+    "40125": "Sorgo",
+}
 
 # --- Banco de dados ---------------------------------------------------------
 DB_USER = os.getenv("POSTGRES_USER")
