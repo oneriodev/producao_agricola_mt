@@ -13,6 +13,7 @@ Execute a partir da RAIZ do projeto:
 import json
 import logging
 from pathlib import Path
+from src.config import MALHA_MT_PATH
 
 import requests
 
@@ -26,7 +27,7 @@ CODIGO_UF_MT = 51
 URL_MALHA = "https://servicodados.ibge.gov.br/api/v3/malhas/estados/{uf}"
 
 # Onde o arquivo será salvo (caminho relativo à raiz do projeto).
-CAMINHO_SAIDA = Path("dados/geo/municipios_mt.geojson")
+CAMINHO_SAIDA = MALHA_MT_PATH
 
 # MT tem 141 ou 142 municípios, conforme a versão da malha
 # (Boa Esperança do Norte foi instalado recentemente).

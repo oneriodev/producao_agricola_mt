@@ -16,15 +16,14 @@ Execute a partir da RAIZ do projeto:
 
 import json
 import logging
-import os
 from pathlib import Path
-
-from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
+
+from src.config import DATABASE_URL, MALHA_MT_PATH
 
 logger = logging.getLogger(__name__)
 
-CAMINHO_MALHA = Path("dados/geo/municipios_mt.geojson")
+CAMINHO_MALHA = MALHA_MT_PATH
 
 
 def codigos_da_malha(caminho: Path = CAMINHO_MALHA) -> set[str]:
@@ -34,23 +33,13 @@ def codigos_da_malha(caminho: Path = CAMINHO_MALHA) -> set[str]:
 
 
 def codigos_do_banco() -> dict[str, str]:
-    """Consulta a tabela municipios e devolve {codigo: nome}.
-
-    As credenciais vêm do .env (nunca escritas no código).
-    """
-    load_dotenv()  # carrega as variáveis do arquivo .env para o ambiente
-
-    # Monta a URL de conexão a partir das variáveis de ambiente.
-    # "postgresql+psycopg2" indica o driver; troque para "postgresql+psycopg"
-    # se o seu projeto usa o psycopg versão 3.
-    url = (
-        "postgresql+psycopg://"
-        f"{os.environ['POSTGRES_USER']}:{os.environ['POSTGRES_PASSWORD']}"
-        f"@{os.environ.get('POSTGRES_HOST', 'localhost')}"
-        f":{os.environ.get('POSTGRES_PORT', '5432')}"
-        f"/{os.environ['POSTGRES_DB']}"
-    )
-    engine = create_engine(url)
+    """Consulta a tabela municipios e devolve {codigo: nome}."""
+    engine = create_engine(DATABASE_URL)  # conexão vem do config.py
+    with engine.connect() as conexao:
+        resultado = conexao.execute(
+            text("SELECT cod_municipio, nome FROM municipios")
+        )
+        return {codigo: nome for codigo, nome in resultado}
 
     # "with" garante que a conexão é fechada mesmo se der erro
     with engine.connect() as conexao:
