@@ -9,11 +9,16 @@ Como executar (a partir da raiz do projeto, com o banco no ar):
     python -m streamlit run app/app.py
 """
 
+import json
+
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 from src import queries
+from src.config import MALHA_MT_PATH
+from src.geo import orientar_para_plotly
 
 TODO_ESTADO = "Todo o estado"
 
@@ -79,9 +84,19 @@ def dados_evolucao(produto, municipio):
 
 
 @st.cache_data(ttl=3600)
-def dados_comparacao(ano):
-    return queries.comparacao_culturas(ano)
+def dados_mapa(produto, ano):
+    return queries.mapa_municipios(produto, ano)
 
+
+# cache_resource (e não cache_data): a malha é grande, só de leitura e igual
+# para todos. cache_data devolveria uma CÓPIA a cada uso; cache_resource
+# devolve sempre o mesmo objeto, sem custo de cópia.
+@st.cache_resource
+@st.cache_resource
+def carregar_malha() -> dict:
+    """Lê o GeoJSON dos municípios e ajusta a orientação para o Plotly."""
+    malha = json.loads(MALHA_MT_PATH.read_text(encoding="utf-8"))
+    return orientar_para_plotly(malha)
 
 # --- Barra lateral: filtros -------------------------------------------------
 
@@ -122,8 +137,9 @@ for coluna_tela, (rotulo, coluna_df) in zip(colunas_kpi, METRICAS.items()):
 
 # --- Abas -------------------------------------------------------------------
 
-aba_ranking, aba_evolucao, aba_comparacao, aba_sobre = st.tabs(
-    ["🏆 Ranking", "📈 Evolução", "🌱 Comparação entre culturas", "ℹ️ Sobre os dados"]
+aba_ranking, aba_mapa, aba_evolucao, aba_comparacao, aba_sobre = st.tabs(
+    ["🏆 Ranking", "🗺️ Mapa", "📈 Evolução", "🌱 Comparação entre culturas",
+     "ℹ️ Sobre os dados"]
 )
 
 # Aba 1: ranking dos municípios (sempre do estado inteiro)
@@ -157,6 +173,74 @@ with aba_ranking:
         })
         st.dataframe(tabela, hide_index=True)
 
+# Aba: mapa coroplético dos municípios (sempre do estado inteiro)
+with aba_mapa:
+    # key é obrigatório: a aba Evolução tem outro radio com o mesmo rótulo
+    # e as mesmas opções; sem key, o Streamlit acusaria widget duplicado.
+    rotulo_mapa = st.radio(
+        "Indicador", list(METRICAS), horizontal=True, key="indicador_mapa"
+    )
+    coluna_mapa = METRICAS[rotulo_mapa]
+
+    malha = carregar_malha()
+    dados = dados_mapa(produto, ano)
+
+    # NULL = "sem dado" (NÃO é zero). Separamos em dois grupos para
+    # pintar os sem dado de cinza, em vez de sumirem do mapa.
+    tem_dado = dados[coluna_mapa].notna()
+    com_dado = dados[tem_dado]
+    sem_dado = dados[~tem_dado]
+
+    if com_dado.empty:
+        st.info("Nenhum município tem esse indicador para essa cultura nesta safra.")
+    else:
+        # Camada 1: municípios com dado, coloridos pelo indicador
+        fig = px.choropleth(
+            com_dado,
+            geojson=malha,
+            locations="cod_municipio",          # coluna com o código no DataFrame
+            featureidkey="properties.codarea",  # onde está o código no GeoJSON
+            color=coluna_mapa,
+            color_continuous_scale="YlGn",      # amarelo (pouco) -> verde (muito)
+            hover_name="municipio",
+            hover_data={coluna_mapa: ":,.0f", "cod_municipio": False},
+            labels={coluna_mapa: rotulo_mapa},
+        )
+
+        # Camada 2: municípios sem dado, em cinza e sem legenda de cor
+        if not sem_dado.empty:
+            fig.add_trace(go.Choropleth(
+                geojson=malha,
+                locations=sem_dado["cod_municipio"],
+                featureidkey="properties.codarea",
+                z=[0] * len(sem_dado),          # valor fictício: a cor é fixa
+                colorscale=[[0, "lightgray"], [1, "lightgray"]],
+                showscale=False,
+                text=sem_dado["municipio"],
+                hovertemplate="<b>%{text}</b><br>Sem dado nesta safra<extra></extra>",
+            ))
+
+        # Enquadra o mapa em MT e esconde o fundo (mundo, oceanos)
+        fig.update_geos(fitbounds="locations", visible=False)
+        fig.update_layout(
+            title=f"{rotulo_mapa} – {produto} em MT – {ano}",
+            height=650,
+            margin={"l": 0, "r": 0, "t": 50, "b": 0},
+            separators=",.",  # decimal com vírgula, milhar com ponto (padrão BR)
+        )
+        st.plotly_chart(fig)
+
+        st.caption("Municípios em cinza: sem dado para esta cultura nesta safra.")
+
+        # Mesma lógica da validação da Etapa 2 (conjunto B − M), agora no painel
+        codigos_malha = {f["properties"]["codarea"] for f in malha["features"]}
+        fora_da_malha = com_dado[~com_dado["cod_municipio"].isin(codigos_malha)]
+        if not fora_da_malha.empty:
+            st.caption(
+                "Sem contorno na malha do IBGE usada (os dados aparecem nas "
+                "outras abas): " + ", ".join(fora_da_malha["municipio"]) + "."
+            )
+
 # Aba 2: evolução ao longo dos anos (estado ou município)
 with aba_evolucao:
     rotulo = st.radio("Indicador", list(METRICAS), horizontal=True)
@@ -179,6 +263,10 @@ with aba_evolucao:
                    "(por exemplo, município criado recentemente).")
 
 # Aba 3: comparação entre as culturas (sempre do estado inteiro)
+@st.cache_data(ttl=3600)
+def dados_comparacao(ano):
+    return queries.comparacao_culturas(ano)
+
 with aba_comparacao:
     st.markdown(f"**Todas as culturas em Mato Grosso – safra {ano}**")
 

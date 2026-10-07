@@ -63,6 +63,8 @@ def evolucao_municipio(produto: str, municipio: str) -> pd.DataFrame:
 def comparacao_culturas(ano: int) -> pd.DataFrame:
     return executar("comparacao_culturas", ano=ano)
 
+def mapa_municipios(produto: str, ano: int) -> pd.DataFrame:
+    return executar("mapa_municipios", produto=produto, ano=ano)
 
 if __name__ == "__main__":
     # Mostra todas as colunas sem quebrar a tabela no terminal
@@ -84,3 +86,8 @@ if __name__ == "__main__":
 
     print("\n=== Comparação entre culturas: 2025 ===")
     print(comparacao_culturas(2025))
+
+    print("\n=== Mapa: Soja 2025 (primeiras linhas) ===")
+    mapa = mapa_municipios("Soja", 2025)
+    print(mapa.head())
+    print("Linhas:", len(mapa), "| sem dado:", mapa["quantidade_t"].isna().sum())

@@ -20,6 +20,8 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 RAW_DIR = BASE_DIR / "data" / "raw"              # dados brutos da API
 PROCESSED_DIR = BASE_DIR / "data" / "processed"  # dados tratados
+GEO_DIR = BASE_DIR / "data" / "geo"                 # malhas geográficas
+MALHA_MT_PATH = GEO_DIR / "municipios_mt.geojson"   # contornos dos municípios de MT
 
 # --- API SIDRA / IBGE -------------------------------------------------------
 # Documentação da tabela: https://apisidra.ibge.gov.br/desctabapi.aspx?c=5457
