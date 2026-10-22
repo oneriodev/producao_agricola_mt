@@ -2,11 +2,10 @@
 
 Pipeline de dados completo (ETL) com a produção agrícola dos 142 municípios de
 Mato Grosso, a partir dos dados oficiais do IBGE. Os dados são extraídos da API
-SIDRA, tratados com pandas, armazenados em PostgreSQL (Docker) e apresentados
-em um painel interativo com Streamlit, que inclui um **mapa por município**
-construído com a malha territorial do IBGE.
+SIDRA, tratados com pandas, armazenados em PostgreSQL e apresentados em um
+painel interativo com Streamlit.
 
-![Mapa da produção de soja em Mato Grosso por município](docs/mapa.png)
+🔗 **Painel online:** [SEU-APP.streamlit.app](https://graoseplantiosmt.streamlit.app/)
 
 ## 📊 Destaques dos dados
 
@@ -24,29 +23,15 @@ construído com a malha territorial do IBGE.
   vale menos da metade: boa parte é a "safrinha", plantada na mesma terra
   após a colheita da soja.
 
-## 🖥️ O painel
-
-| Aba | O que mostra |
-|---|---|
-| 🏆 Ranking | Maiores municípios produtores da cultura e safra escolhidas, com participação no estado |
-| 🗺️ Mapa | Mapa coroplético de MT por município: produção, área colhida, rendimento ou valor da produção |
-| 📈 Evolução | Série histórica de 2010 a 2025 para o estado ou para um município |
-| 🌱 Comparação | Área plantada, valor da produção e valor por hectare de todas as culturas |
-| ℹ️ Sobre os dados | Notas metodológicas e cuidados na leitura |
-
-Os indicadores (KPIs) no topo mostram a variação em relação à safra anterior.
-
 ## 🏗️ Arquitetura
 
 ```mermaid
 flowchart LR
     A[API SIDRA / IBGE] -->|requests| B[extract.py<br/>data/raw]
     B -->|pandas| C[transform.py<br/>data/processed]
-    C -->|SQLAlchemy| D[(PostgreSQL<br/>Docker)]
+    C -->|SQLAlchemy| D[(PostgreSQL<br/>Docker local ou Neon)]
     D -->|SQL| E[queries.py]
     E --> F[Painel<br/>Streamlit + Plotly]
-    G[API de Malhas / IBGE] -->|requests| H[malha_mt.py<br/>data/geo]
-    H -->|GeoJSON| F
 ```
 
 | Etapa | Módulo | O que faz |
@@ -54,32 +39,24 @@ flowchart LR
 | Extração | `src/extract.py` | Consulta a API SIDRA (tabela 5457) por cultura e salva o dado bruto |
 | Transformação | `src/transform.py` | Converte tipos, trata valores ausentes, pivota para formato largo e valida |
 | Carga | `src/load.py` | Grava em 3 tabelas relacionais, com carga completa em transação |
-| Malha territorial | `src/malha_mt.py` | Baixa os contornos dos municípios de MT (GeoJSON), valida e salva localmente |
-| Validação geográfica | `src/validar_codigos.py` | Confere se os códigos IBGE da malha correspondem aos do banco |
-| Geometria | `src/geo.py` | Ajusta a orientação dos polígonos para o formato exigido pelo Plotly |
 | Análise | `src/queries.py` + `sql/` | Consultas SQL parametrizadas usadas pelo painel |
-| Visualização | `app/app.py` | Painel com KPIs, ranking, mapa, evolução e comparação entre culturas |
+| Visualização | `streamlit_app.py` | Painel com KPIs, ranking, evolução e comparação entre culturas |
 
 ## 🛠️ Stack
 
 - **Python 3.12** · requests · pandas
-- **PostgreSQL 16** em Docker (docker compose)
+- **PostgreSQL** em Docker (desenvolvimento local) e no **Neon** (versão online)
 - **SQLAlchemy 2.0** (ORM para modelagem, Core para consultas) · psycopg 3
-- **Streamlit** + **Plotly** para o painel e o mapa (GeoJSON)
+- **Streamlit** + **Plotly** para o painel, publicado no **Streamlit Community Cloud**
 - **Git/GitHub** para versionamento
 
 ## 📁 Estrutura do projeto
 
 ```
 producao_agricola_mt/
-├── app/
-│   └── app.py              # painel Streamlit
 ├── data/
 │   ├── raw/                # dados brutos da API (não versionados)
-│   ├── processed/          # dados tratados (não versionados)
-│   └── geo/                # malha municipal de MT em GeoJSON (versionada)
-├── docs/
-│   └── mapa.png            # imagem usada neste README
+│   └── processed/          # dados tratados (não versionados)
 ├── sql/                    # consultas de análise (.sql)
 ├── src/
 │   ├── config.py           # configurações centrais (códigos IBGE, caminhos, banco)
@@ -88,11 +65,9 @@ producao_agricola_mt/
 │   ├── models.py           # modelos das tabelas (SQLAlchemy)
 │   ├── load.py             # carga no banco
 │   ├── queries.py          # execução das consultas
-│   ├── pipeline.py         # executa extração + transformação + carga
-│   ├── malha_mt.py         # extração da malha municipal (API de Malhas do IBGE)
-│   ├── validar_codigos.py  # validação malha × banco
-│   └── geo.py              # utilidades geográficas (orientação dos polígonos)
-├── docker-compose.yml      # PostgreSQL
+│   └── pipeline.py         # executa extração + transformação + carga
+├── streamlit_app.py        # painel Streamlit
+├── docker-compose.yml      # PostgreSQL local
 ├── .env.example            # modelo das variáveis de ambiente
 └── requirements.txt
 ```
@@ -127,10 +102,9 @@ erDiagram
 ```
 
 A chave primária composta (município + cultura + ano) impede registros
-duplicados diretamente no banco. O código IBGE do município (`cod_municipio`,
-7 dígitos) é também a chave que liga os dados do banco aos contornos do mapa.
+duplicados diretamente no banco.
 
-## 🚀 Como executar
+## 🚀 Como executar localmente
 
 **Pré-requisitos:** Python 3.12+, Docker com Docker Compose e Git.
 
@@ -144,7 +118,7 @@ cd producao_agricola_mt
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate        # Linux/Mac
-# .venv\Scripts\Activate.ps1     # Windows (PowerShell)
+# .venv\Scripts\activate         # Windows
 pip install -r requirements.txt
 ```
 
@@ -155,35 +129,56 @@ cp .env.example .env             # Linux/Mac
 ```
 Edite o `.env` e defina uma senha para o banco.
 
+> Se você já tem um PostgreSQL instalado usando a porta 5432, troque
+> `POSTGRES_PORT` no `.env` (por exemplo, para `5433`).
+
 **4. Subir o PostgreSQL**
 ```bash
 docker compose up -d
 ```
-O banco fica acessível apenas a partir da própria máquina (`127.0.0.1`).
 
 **5. Rodar o pipeline** (extração, transformação e carga)
 ```bash
 python -m src.pipeline
 ```
 
-**6. (Opcional) Baixar e validar a malha municipal**
-
-A malha já vem versionada em `data/geo/`. Para baixá-la de novo, apague o
-arquivo e rode:
+**6. Abrir o painel**
 ```bash
-python -m src.malha_mt
-python -m src.validar_codigos
-```
-
-**7. Abrir o painel**
-```bash
-python -m streamlit run app/app.py
+streamlit run streamlit_app.py
 ```
 O painel abre em `http://localhost:8501`.
 
-## 🧠 Decisões técnicas
+## 🌐 Deploy
 
-**Pipeline e banco**
+A versão online usa o mesmo código, com dois serviços gratuitos:
+
+- **Banco de dados:** PostgreSQL gerenciado no [Neon](https://neon.tech), com
+  conexão criptografada (SSL).
+- **Painel:** [Streamlit Community Cloud](https://streamlit.io/cloud), que lê
+  o repositório do GitHub e publica o `streamlit_app.py`.
+
+A conexão é definida pela variável de ambiente `DATABASE_URL`. Quando ela
+existe, o projeto usa o banco na nuvem; quando não existe, monta a conexão
+com o PostgreSQL local a partir das variáveis `POSTGRES_*` do `.env`.
+
+Para publicar:
+1. Crie um banco no Neon e copie a connection string.
+2. Carregue os dados rodando o pipeline com a variável definida:
+```bash
+   export DATABASE_URL="postgresql://..."      # Linux/Mac
+   # $env:DATABASE_URL = "postgresql://..."    # Windows (PowerShell)
+   python -m src.pipeline
+```
+3. No Streamlit Cloud, publique o repositório apontando para `streamlit_app.py`
+   e cadastre a `DATABASE_URL` em **Settings → Secrets**:
+```toml
+   DATABASE_URL = "postgresql://..."
+```
+
+A connection string contém a senha do banco: ela nunca é gravada no código
+nem enviada ao repositório.
+
+## 🧠 Decisões técnicas
 
 - **Dado bruto preservado:** a extração salva a resposta da API sem alterações.
   Se a transformação mudar, basta reprocessar, sem consultar a API de novo.
@@ -201,37 +196,12 @@ O painel abre em `http://localhost:8501`.
   como produção total ÷ área colhida total, e não como média simples dos
   municípios, que daria o mesmo peso a municípios pequenos e grandes.
 - **Configuração centralizada:** códigos do IBGE, caminhos e credenciais
-  ficam em `config.py` e `.env`. Incluir uma nova cultura exige mudar uma
-  única linha.
-
-**Mapa**
-
-- **Validar antes de visualizar:** os códigos da malha (M) e do banco (B) são
-  comparados com operações de conjuntos. M ∩ B são os municípios desenhados;
-  B − M são municípios com dados mas sem contorno, que sumiriam do mapa sem
-  aviso. Essa checagem encontrou um caso real (ver Limitações) e foi
-  incorporada ao painel, que exibe o aviso automaticamente.
-- **NULL não é zero no mapa:** a consulta parte da tabela de municípios com
-  `LEFT JOIN`, com os filtros de cultura e ano na cláusula `ON` (no `WHERE`,
-  eles transformariam a consulta em um `INNER JOIN` e descartariam os
-  municípios sem dado). Municípios sem dado aparecem em cinza, e não como
-  "produção zero".
-- **Orientação dos polígonos:** o padrão GeoJSON (RFC 7946) usa contornos em
-  sentido anti-horário, mas o Plotly espera o sentido horário. Sem ajuste,
-  cada município é interpretado como "o planeta inteiro menos o município".
-  O sentido de cada contorno é identificado pelo sinal da área calculada com
-  a fórmula do laço (*shoelace*) e invertido quando necessário. A correção é
-  feita ao carregar o mapa, mantendo o arquivo salvo no padrão oficial.
-- **Malha local e idempotente:** a malha é baixada uma vez, validada e salva
-  em `data/geo/`. O painel não depende da API do IBGE para funcionar.
-
-**Segurança**
-
-- **Credenciais fora do código:** senhas e dados de conexão ficam no `.env`,
-  que não é versionado.
-- **Banco acessível só localmente:** a porta do PostgreSQL é publicada em
-  `127.0.0.1`. No Linux, portas publicadas pelo Docker em `0.0.0.0` ficam
-  expostas à rede mesmo com o firewall (`ufw`) ativo.
+  ficam em `config.py` e em variáveis de ambiente. Incluir uma nova cultura
+  exige mudar uma única linha.
+- **Mesmo código local e na nuvem:** a troca entre o banco local e o Neon é
+  feita só pela variável `DATABASE_URL`, sem alterar o código. O pool de
+  conexões testa cada conexão antes de usar (`pool_pre_ping`), porque o
+  banco na nuvem encerra conexões ociosas.
 
 ## ⚠️ Limitações e cuidados na leitura
 
@@ -242,24 +212,17 @@ O painel abre em `http://localhost:8501`.
 - **Boa Esperança do Norte** é um município recém-criado e só possui dados
   a partir de 2025. Municípios vizinhos podem apresentar redução de área
   nesse ano por mudança de território, e não por queda de produção.
-- **No mapa**, Boa Esperança do Norte ainda não aparece, pois não consta na
-  malha do IBGE utilizada (141 municípios). Por isso, em 2025, o contorno de
-  Sorriso ainda inclui a área do novo município. Os dados dele aparecem
-  normalmente nas demais abas.
-
-## 🔭 Próximos passos
-
-- Cruzar a produção com dados de clima (chuva e temperatura por safra).
-- Previsão de produtividade com modelos de Machine Learning.
-- Testes automatizados (pytest) e verificação de código (ruff) com GitHub Actions.
+- No plano gratuito do Neon, o banco é suspenso quando fica sem uso. O
+  **primeiro acesso** ao painel depois de um tempo parado pode levar alguns
+  segundos a mais.
 
 ## 📚 Fonte dos dados
 
-- IBGE – Produção Agrícola Municipal (PAM), tabela 5457:
-  [sidra.ibge.gov.br/tabela/5457](https://sidra.ibge.gov.br/tabela/5457)
-- IBGE – API de Malhas Territoriais (contornos dos municípios):
-  [servicodados.ibge.gov.br/api/docs/malhas](https://servicodados.ibge.gov.br/api/docs/malhas?versao=3)
+IBGE – Produção Agrícola Municipal (PAM), tabela 5457:
+[sidra.ibge.gov.br/tabela/5457](https://sidra.ibge.gov.br/tabela/5457)
 
 ## 👤 Autor
 
 **Onerio** – estudante de Engenharia de Software, com foco em Python e dados.
+
+[GitHub](https://github.com/oneriodev) · [LinkedIn](https://www.linkedin.com/in/onerio-ramos)
