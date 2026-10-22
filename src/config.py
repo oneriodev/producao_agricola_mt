@@ -59,12 +59,20 @@ DB_PORT = int(os.getenv("POSTGRES_PORT", "5432"))   # porta precisa ser número
 DB_NAME = os.getenv("POSTGRES_DB")
 
 # URL de conexão no formato que o SQLAlchemy entende.
-# "postgresql+psycopg" = banco PostgreSQL usando o driver psycopg (versão 3).
-DATABASE_URL = URL.create(
-    drivername="postgresql+psycopg",
-    username=DB_USER,
-    password=DB_PASSWORD,
-    host=DB_HOST,
-    port=DB_PORT,
-    database=DB_NAME,
-)
+# Se existir a variável DATABASE_URL (banco na nuvem, ex.: Neon), usa ela.
+# Senão, monta a URL a partir das variáveis POSTGRES_* (Docker local).
+_url_externa = os.getenv("DATABASE_URL")
+
+if _url_externa:
+    # O Neon fornece "postgresql://..."; trocamos para usar o driver psycopg 3
+    DATABASE_URL = _url_externa.replace("postgresql://", "postgresql+psycopg://", 1)
+else:
+    # "postgresql+psycopg" = banco PostgreSQL usando o driver psycopg (versão 3)
+    DATABASE_URL = URL.create(
+        drivername="postgresql+psycopg",
+        username=DB_USER,
+        password=DB_PASSWORD,
+        host=DB_HOST,
+        port=DB_PORT,
+        database=DB_NAME,
+    )

@@ -16,9 +16,9 @@ from src.config import BASE_DIR, DATABASE_URL
 
 SQL_DIR = BASE_DIR / "sql"
 
-# Um único engine para o módulo todo: ele gerencia e reaproveita conexões
-engine = create_engine(DATABASE_URL)
-
+# pool_pre_ping: testa a conexão antes de usar (bancos na nuvem
+# como o Neon encerram conexões paradas)
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
 def ler_sql(nome: str) -> str:
     """Lê o conteúdo do arquivo sql/<nome>.sql."""
