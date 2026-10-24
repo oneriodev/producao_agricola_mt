@@ -19,6 +19,9 @@ import streamlit as st
 from src import queries
 from src.config import MALHA_MT_PATH
 from src.geo import orientar_para_plotly
+from psycopg.errors import UndefinedTable
+from sqlalchemy.exc import ProgrammingError
+
 
 TODO_ESTADO = "Todo o estado"
 
@@ -28,6 +31,17 @@ METRICAS = {
     "Área colhida (ha)": "area_colhida_ha",
     "Rendimento médio (kg/ha)": "rendimento_kg_ha",
     "Valor da produção (mil R$)": "valor_producao_mil_reais",
+}
+
+# Cor fixa para cada perfil: a mesma cor sempre significa o mesmo perfil,
+# mesmo que a ordem dos grupos mude entre execuções do modelo.
+CORES_PERFIS = {
+    "Polo soja-milho consolidado": "#2E7D32",
+    "Fronteira agrícola em expansão": "#9CCC65",
+    "Polo do algodão": "#5C6BC0",
+    "Polo canavieiro": "#F9A825",
+    "Agricultura incipiente, com foco em milho": "#8D6E63",
+    "Lavouras pouco expressivas": "#BDBDBD",
 }
 
 # Precisa ser o PRIMEIRO comando do Streamlit no script
@@ -88,10 +102,29 @@ def dados_mapa(produto, ano):
     return queries.mapa_municipios(produto, ano)
 
 
+@st.cache_data(ttl=3600)
+def dados_comparacao(ano):
+    return queries.comparacao_culturas(ano)
+
+
+@st.cache_data(ttl=3600)
+def dados_perfis():
+    """Resultado da última clusterização: (resumo, por_municipio).
+
+    Devolve None se as tabelas de ML não existirem no banco (por exemplo,
+    no painel publicado antes de os modelos serem enviados ao Neon).
+    """
+    try:
+        return queries.perfis_resumo(), queries.perfis_municipios()
+    except ProgrammingError as erro:
+        if isinstance(erro.orig, UndefinedTable):  # só "tabela não existe"
+            return None
+        raise  # qualquer outro erro continua aparecendo
+
+
 # cache_resource (e não cache_data): a malha é grande, só de leitura e igual
 # para todos. cache_data devolveria uma CÓPIA a cada uso; cache_resource
 # devolve sempre o mesmo objeto, sem custo de cópia.
-@st.cache_resource
 @st.cache_resource
 def carregar_malha() -> dict:
     """Lê o GeoJSON dos municípios e ajusta a orientação para o Plotly."""
@@ -109,7 +142,7 @@ municipio = st.sidebar.selectbox("Município", [TODO_ESTADO] + municipios)
 limite = st.sidebar.slider("Municípios no ranking", min_value=5, max_value=30, value=10)
 
 local = "Mato Grosso" if municipio == TODO_ESTADO else municipio
-
+# --- Acesso aos dados (com cache)
 # --- Cabeçalho --------------------------------------------------------------
 
 st.title("🌾 Produção Agrícola de Mato Grosso")
@@ -137,9 +170,9 @@ for coluna_tela, (rotulo, coluna_df) in zip(colunas_kpi, METRICAS.items()):
 
 # --- Abas -------------------------------------------------------------------
 
-aba_ranking, aba_mapa, aba_evolucao, aba_comparacao, aba_sobre = st.tabs(
+aba_ranking, aba_mapa, aba_evolucao, aba_comparacao, aba_previsoes, aba_sobre = st.tabs(
     ["🏆 Ranking", "🗺️ Mapa", "📈 Evolução", "🌱 Comparação entre culturas",
-     "ℹ️ Sobre os dados"]
+     "🔮 Previsões", "ℹ️ Sobre os dados"]
 )
 
 # Aba 1: ranking dos municípios (sempre do estado inteiro)
@@ -311,6 +344,79 @@ with aba_comparacao:
     st.caption("A mesma terra pode ser plantada mais de uma vez no ano "
                "(ex.: milho safrinha depois da soja), então a soma das áreas "
                "pode ser maior que a área agrícola real.")
+
+# Aba: resultados dos modelos de Machine Learning
+with aba_previsoes:
+    st.markdown("### Perfis produtivos dos municípios")
+    st.caption(
+        "Municípios agrupados pelo algoritmo K-Means a partir do que plantam "
+        "(participação de soja, milho, algodão e outras culturas), do tamanho da "
+        "área plantada, da produtividade e do crescimento da área (médias de 2021 "
+        "a 2025). Municípios com menos de 500 ha plantados formam um perfil à "
+        "parte, definido por regra."
+    )
+
+    perfis = dados_perfis()
+
+    if perfis is None:
+        st.info("Os resultados dos modelos ainda não foram publicados neste ambiente.")
+    elif perfis[0].empty:
+        st.info("Nenhuma clusterização foi executada ainda "
+                "(rode: python -m src.ml.clusterizacao).")
+    else:
+        resumo, por_municipio = perfis
+        ordem = resumo["perfil"].tolist()  # do maior para o menor grupo
+
+        # Integra com o filtro da barra lateral: mostra o perfil do município
+        if municipio != TODO_ESTADO:
+            linha = por_municipio[por_municipio["municipio"] == municipio]
+            if linha.empty:
+                st.info(f"{municipio} não entrou na clusterização "
+                        "(sem histórico suficiente).")
+            else:
+                st.success(f"**{municipio}** pertence ao perfil "
+                           f"**{linha['perfil'].iloc[0]}**.")
+
+        # Mapa com cores por CATEGORIA (e não escala contínua, como na aba Mapa)
+        fig = px.choropleth(
+            por_municipio,
+            geojson=carregar_malha(),
+            locations="cod_municipio",
+            featureidkey="properties.codarea",
+            color="perfil",
+            color_discrete_map=CORES_PERFIS,
+            category_orders={"perfil": ordem},  # legenda do maior para o menor
+            hover_name="municipio",
+            hover_data={"area_media_ha": ":,.0f", "cod_municipio": False},
+            labels={"perfil": "Perfil", "area_media_ha": "Área plantada média (ha)"},
+        )
+        fig.update_geos(fitbounds="locations", visible=False)
+        fig.update_layout(
+            height=650,
+            margin={"l": 0, "r": 0, "t": 30, "b": 0},
+            separators=",.",
+        )
+        st.plotly_chart(fig)
+
+        tabela = resumo.rename(columns={
+            "perfil": "Perfil",
+            "municipios": "Municípios",
+            "descricao": "Características",
+        })[["Perfil", "Municípios", "Características"]]
+        st.dataframe(tabela, hide_index=True)
+
+        with st.expander("Ver os municípios de cada perfil"):
+            escolhido = st.selectbox("Perfil", ordem, key="perfil_lista")
+            nomes = por_municipio.loc[
+                por_municipio["perfil"] == escolhido, "municipio"
+            ].sort_values()
+            st.write(", ".join(nomes))
+
+        data = pd.to_datetime(resumo["criado_em"].iloc[0]).strftime("%d/%m/%Y")
+        st.caption(
+            f"Clusterização executada em {data}. Os perfis são agrupamentos "
+            "estatísticos para análise, e não uma classificação oficial."
+        )
 
 # Aba 4: notas metodológicas
 with aba_sobre:

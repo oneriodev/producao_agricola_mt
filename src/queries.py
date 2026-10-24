@@ -66,6 +66,16 @@ def comparacao_culturas(ano: int) -> pd.DataFrame:
 def mapa_municipios(produto: str, ano: int) -> pd.DataFrame:
     return executar("mapa_municipios", produto=produto, ano=ano)
 
+
+# --- Resultados de Machine Learning -----------------------------------------
+
+def perfis_resumo() -> pd.DataFrame:
+    return executar("perfis_resumo")
+
+
+def perfis_municipios() -> pd.DataFrame:
+    return executar("perfis_municipios")
+
 if __name__ == "__main__":
     # Mostra todas as colunas sem quebrar a tabela no terminal
     pd.set_option("display.width", 200)
