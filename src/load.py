@@ -14,11 +14,11 @@ Como executar (a partir da raiz do projeto, com o banco no ar):
 
 import pandas as pd
 from sqlalchemy import create_engine, text
+from sqlalchemy.dialects.postgresql import insert
 
 from src.config import DATABASE_URL
-from src.models import Base
+from src.models import Base, Municipio, Produto
 from src.transform import ARQUIVO_TRATADO
-
 
 def carregar_tratado(caminho=ARQUIVO_TRATADO) -> pd.DataFrame:
     """Lê o CSV tratado, mantendo os códigos como texto."""
@@ -44,22 +44,45 @@ def separar_tabelas(df: pd.DataFrame):
 
     return municipios, produtos, producao
 
+def gravar_cadastro(conn, modelo, df: pd.DataFrame) -> None:
+    """Upsert: insere registros novos e atualiza os existentes.
+
+    Diferente do TRUNCATE, não apaga nada. Assim, as tabelas de ML que
+    apontam para municipios/produtos (chave estrangeira) não são afetadas.
+    Em SQL: INSERT ... ON CONFLICT (chave) DO UPDATE SET ...
+    """
+    registros = df.to_dict(orient="records")  # lista de dicionários, 1 por linha
+    if not registros:
+        return
+
+    tabela = modelo.__table__
+    chaves = [coluna.name for coluna in tabela.primary_key.columns]
+
+    comando = insert(tabela).values(registros)
+    comando = comando.on_conflict_do_update(
+        index_elements=chaves,
+        # "excluded" = os valores que tentamos inserir e bateram na chave
+        set_={c: comando.excluded[c] for c in df.columns if c not in chaves},
+    )
+    conn.execute(comando)
 
 def carregar_no_banco(engine, municipios, produtos, producao) -> None:
-    """Cria as tabelas (se preciso) e faz a carga completa em uma transação."""
+    """Grava os dados em uma transação.
+
+    - municipios e produtos: upsert (preserva as tabelas que dependem deles)
+    - producao: carga completa (TRUNCATE + INSERT), pois nada depende dela
+    """
     # Cria as tabelas definidas em models.py, caso ainda não existam
     Base.metadata.create_all(engine)
 
     # engine.begin() abre uma transação: se algo falhar, tudo é desfeito
     with engine.begin() as conn:
-        # Esvazia as tabelas (carga completa = idempotente)
-        conn.execute(text("TRUNCATE TABLE producao, produtos, municipios"))
-
         # Cadastros primeiro, produção depois (por causa das chaves estrangeiras)
-        municipios.to_sql("municipios", conn, if_exists="append", index=False)
-        produtos.to_sql("produtos", conn, if_exists="append", index=False)
-        producao.to_sql("producao", conn, if_exists="append", index=False)
+        gravar_cadastro(conn, Municipio, municipios)
+        gravar_cadastro(conn, Produto, produtos)
 
+        conn.execute(text("TRUNCATE TABLE producao"))
+        producao.to_sql("producao", conn, if_exists="append", index=False)
 
 def contar_registros(engine) -> None:
     """Mostra quantas linhas existem em cada tabela."""
