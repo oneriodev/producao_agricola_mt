@@ -19,9 +19,9 @@ import streamlit as st
 from src import queries
 from src.config import MALHA_MT_PATH
 from src.geo import orientar_para_plotly
+from pandas.errors import DatabaseError
 from psycopg.errors import UndefinedTable
 from sqlalchemy.exc import ProgrammingError
-
 
 TODO_ESTADO = "Todo o estado"
 
@@ -116,35 +116,44 @@ def dados_comparacao(ano):
 
 
 @st.cache_data(ttl=3600)
-def dados_perfis():
-    """Resultado da última clusterização: (resumo, por_municipio).
+def _tabela_inexistente(erro: BaseException) -> bool:
+    """Procura 'tabela não existe' (UndefinedTable) na cadeia de exceções.
 
-    Devolve None se as tabelas de ML não existirem no banco (por exemplo,
-    no painel publicado antes de os modelos serem enviados ao Neon).
+    O erro original do banco chega embrulhado em camadas:
+    psycopg (UndefinedTable) -> SQLAlchemy (ProgrammingError) -> pandas (DatabaseError).
+    O SQLAlchemy guarda o erro do driver em .orig; o Python guarda a exceção
+    anterior em __cause__. Percorremos tudo até achar, ou não, o UndefinedTable.
     """
+    atual = erro
+    while atual is not None:
+        if isinstance(atual, UndefinedTable):
+            return True
+        atual = getattr(atual, "orig", None) or atual.__cause__
+    return False
+
+
+def _consultar_resultados_ml(*consultas):
+    """Executa as consultas de ML; devolve None se as tabelas não existirem."""
     try:
-        return queries.perfis_resumo(), queries.perfis_municipios()
-    except ProgrammingError as erro:
-        if isinstance(erro.orig, UndefinedTable):  # só "tabela não existe"
+        return tuple(consulta() for consulta in consultas)
+    except (DatabaseError, ProgrammingError) as erro:
+        if _tabela_inexistente(erro):  # só "tabela não existe" é tratado
             return None
         raise  # qualquer outro erro continua aparecendo
 
+
+@st.cache_data(ttl=3600)
+def dados_perfis():
+    """Resultado da última clusterização: (resumo, por_municipio), ou None."""
+    return _consultar_resultados_ml(queries.perfis_resumo, queries.perfis_municipios)
+
+
 @st.cache_data(ttl=3600)
 def dados_previsoes():
-    """Resultado da última previsão: (metricas, backtest, futuro).
-
-    Devolve None se as tabelas de ML não existirem no banco.
-    """
-    try:
-        return (
-            queries.previsao_metricas(),
-            queries.previsao_backtest(),
-            queries.previsao_futuro(),
-        )
-    except ProgrammingError as erro:
-        if isinstance(erro.orig, UndefinedTable):  # só "tabela não existe"
-            return None
-        raise
+    """Resultado da última previsão: (metricas, backtest, futuro), ou None."""
+    return _consultar_resultados_ml(
+        queries.previsao_metricas, queries.previsao_backtest, queries.previsao_futuro
+    )
 
 # cache_resource (e não cache_data): a malha é grande, só de leitura e igual
 # para todos. cache_data devolveria uma CÓPIA a cada uso; cache_resource
