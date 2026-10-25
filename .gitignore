@@ -11,4 +11,4 @@ __pycache__/
 # Dados gerados (podem ser recriados rodando o pipeline)
 data/raw/*
 data/processed/*
-!data/**/.gitkeep
+!data/**/.gitkeep.pytest_cache/

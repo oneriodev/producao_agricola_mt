@@ -2,3 +2,4 @@
 scikit-learn==1.9.1
 ipykernel==7.4.0
 nbformat==5.10.4
+pytest==9.1.1

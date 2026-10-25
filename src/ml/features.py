@@ -142,3 +142,54 @@ if __name__ == "__main__":
 
     print("\nResumo estatístico:")
     print(feats[FEATURES_CLUSTER].describe().round(3))
+
+    # =============================================================================
+# Features da PREVISÃO de produtividade
+# =============================================================================
+
+PRODUTO_PREVISAO = "Soja"
+AREA_MINIMA_PREVISAO_HA = 1_000  # abaixo disso, a produtividade é ruído
+ALVO = "rendimento_kg_ha"
+FEATURES_PREVISAO = ["rend_lag1", "rend_lag2", "rend_lag3", "rend_media3", "area_lag1"]
+
+
+def features_previsao(
+    df: pd.DataFrame | None = None, produto: str = PRODUTO_PREVISAO
+) -> pd.DataFrame:
+    """Uma linha por município e ano, com o alvo e as defasagens.
+
+    Regra de ouro: toda feature do ano t usa SÓ informação de anos anteriores.
+    """
+    if df is None:
+        df = carregar_producao()
+
+    colunas = ["cod_municipio", "municipio", "ano", ALVO,
+               "area_colhida_ha", "area_plantada_ha"]
+    cultura = df.loc[df["produto"] == produto, colunas]
+
+    # Grade completa município x ano: anos sem registro viram NaN.
+    # Sem isso, shift(1) num município que "pulou" um ano pegaria o valor
+    # de DOIS anos antes, sem nenhum aviso.
+    anos = range(cultura["ano"].min(), cultura["ano"].max() + 1)
+    grade = pd.MultiIndex.from_product(
+        [cultura["cod_municipio"].unique(), anos], names=["cod_municipio", "ano"]
+    )
+    serie = cultura.set_index(["cod_municipio", "ano"]).reindex(grade).sort_index()
+    serie["municipio"] = serie.groupby(level="cod_municipio")["municipio"].transform("first")
+
+    # Área pequena: produtividade não confiável -> desconhecida (NaN)
+    pouca_area = serie["area_colhida_ha"].fillna(0) < AREA_MINIMA_PREVISAO_HA
+    serie.loc[pouca_area, ALVO] = np.nan
+
+    por_municipio = serie.groupby(level="cod_municipio")
+    serie["rend_lag1"] = por_municipio[ALVO].shift(1)
+    serie["rend_lag2"] = por_municipio[ALVO].shift(2)
+    serie["rend_lag3"] = por_municipio[ALVO].shift(3)
+    # Média feita a partir das DEFASAGENS: impossível incluir o próprio ano.
+    # skipna=False: se faltar algum dos 3 anos, a média fica NaN.
+    serie["rend_media3"] = serie[["rend_lag1", "rend_lag2", "rend_lag3"]].mean(
+        axis=1, skipna=False
+    )
+    serie["area_lag1"] = por_municipio["area_plantada_ha"].shift(1)
+
+    return serie.reset_index()
