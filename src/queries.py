@@ -76,6 +76,17 @@ def perfis_resumo() -> pd.DataFrame:
 def perfis_municipios() -> pd.DataFrame:
     return executar("perfis_municipios")
 
+def previsao_metricas() -> pd.DataFrame:
+    return executar("previsao_metricas")
+
+
+def previsao_backtest() -> pd.DataFrame:
+    return executar("previsao_backtest")
+
+
+def previsao_futuro() -> pd.DataFrame:
+    return executar("previsao_futuro")
+
 if __name__ == "__main__":
     # Mostra todas as colunas sem quebrar a tabela no terminal
     pd.set_option("display.width", 200)

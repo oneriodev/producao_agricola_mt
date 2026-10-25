@@ -44,6 +44,14 @@ CORES_PERFIS = {
     "Lavouras pouco expressivas": "#BDBDBD",
 }
 
+# Nome técnico (gravado no banco) -> nome exibido no painel
+NOMES_MODELOS = {
+    "baseline_media_3_anos": "Média dos 3 anos anteriores (baseline)",
+    "baseline_ano_anterior": "Repetir o ano anterior (baseline)",
+    "rf_direto": "Random Forest (valor direto)",
+    "rf_variacao": "Random Forest (variação)",
+}
+
 # Precisa ser o PRIMEIRO comando do Streamlit no script
 st.set_page_config(
     page_title="Produção Agrícola MT",
@@ -121,6 +129,22 @@ def dados_perfis():
             return None
         raise  # qualquer outro erro continua aparecendo
 
+@st.cache_data(ttl=3600)
+def dados_previsoes():
+    """Resultado da última previsão: (metricas, backtest, futuro).
+
+    Devolve None se as tabelas de ML não existirem no banco.
+    """
+    try:
+        return (
+            queries.previsao_metricas(),
+            queries.previsao_backtest(),
+            queries.previsao_futuro(),
+        )
+    except ProgrammingError as erro:
+        if isinstance(erro.orig, UndefinedTable):  # só "tabela não existe"
+            return None
+        raise
 
 # cache_resource (e não cache_data): a malha é grande, só de leitura e igual
 # para todos. cache_data devolveria uma CÓPIA a cada uso; cache_resource
@@ -169,6 +193,171 @@ for coluna_tela, (rotulo, coluna_df) in zip(colunas_kpi, METRICAS.items()):
     )
 
 # --- Abas -------------------------------------------------------------------
+
+# --- Seções reutilizáveis ---------------------------------------------------
+
+def secao_produtividade(municipio_escolhido: str) -> None:
+    """Seção da aba Previsões: previsão da produtividade da soja."""
+    st.markdown("### Previsão da produtividade da soja")
+
+    resultado = dados_previsoes()
+    if resultado is None:
+        st.info("Os resultados dos modelos ainda não foram publicados neste ambiente.")
+        return
+    metricas, backtest, futuro = resultado
+    if metricas.empty:
+        st.info("Nenhuma previsão foi executada ainda (rode: python -m src.ml.previsao).")
+        return
+
+    def nome(modelo: str) -> str:
+        return NOMES_MODELOS.get(modelo, modelo)  # nome técnico, se não houver amigável
+
+    escolhido = metricas["modelo_escolhido"].iloc[0]
+    st.caption(
+        "Quatro modelos foram testados prevendo cada safra de 2020 a 2025 usando "
+        "apenas dados dos anos anteriores (validação temporal). O modelo publicado "
+        "é o de menor erro médio."
+    )
+
+    # 1. Comparação dos modelos ------------------------------------------------
+    referencia = metricas.loc[
+        metricas["modelo"] == "baseline_media_3_anos", "mae_kg_ha"
+    ].iloc[0]
+    ganho = (1 - metricas["mae_kg_ha"] / referencia) * 100
+    tabela = pd.DataFrame({
+        "Modelo": metricas["modelo"].map(nome),
+        "Erro médio (kg/ha)": metricas["mae_kg_ha"].map(formatar_numero),
+        "Erro médio (%)": metricas["mape_pct"].map(lambda v: formatar_numero(v, 1)),
+        "Ganho sobre a média de 3 anos (%)": ganho.map(lambda v: formatar_numero(v, 1)),
+        "Publicado": metricas["modelo"].eq(escolhido).map({True: "✅", False: ""}),
+    })
+    st.dataframe(tabela, hide_index=True)
+
+    # 2. Conclusão honesta -----------------------------------------------------
+    if escolhido.startswith("baseline"):
+        st.info(
+            "**Nenhum modelo de Machine Learning superou o baseline.** A previsão "
+            f"publicada usa **{nome(escolhido)}**. As features disponíveis descrevem "
+            "apenas o histórico de cada município; o que faz uma safra fugir da média "
+            "(chuva, veranico, calor) não está nos dados. Com informações de clima, "
+            "esse resultado pode mudar."
+        )
+
+    # 3. Erro por safra --------------------------------------------------------
+    erros = backtest.assign(
+        erro=(backtest["real_kg_ha"] - backtest["previsto_kg_ha"]).abs()
+    )
+    por_ano = erros.groupby(["ano", "modelo"], as_index=False)["erro"].mean()
+    por_ano["modelo"] = por_ano["modelo"].map(nome)
+    fig = px.line(
+        por_ano,
+        x="ano",
+        y="erro",
+        color="modelo",
+        markers=True,
+        labels={"ano": "Safra", "erro": "Erro médio (kg/ha)", "modelo": "Modelo"},
+        title="Erro médio de cada modelo por safra",
+    )
+    fig.update_layout(separators=",.")
+    st.plotly_chart(fig)
+    st.caption(
+        "O erro dispara em 2024, ano de forte queda na produtividade, e em 2025, "
+        "ano de recuperação: nenhum modelo baseado apenas no histórico antecipa "
+        "uma quebra de safra."
+    )
+
+    # 4. Previsão do próximo ano -----------------------------------------------
+    if futuro.empty:
+        return
+    ano_futuro = int(futuro["ano"].iloc[0])
+    st.markdown(f"#### Produtividade prevista para {ano_futuro}")
+
+    malha = carregar_malha()
+    fig = px.choropleth(
+        futuro,
+        geojson=malha,
+        locations="cod_municipio",
+        featureidkey="properties.codarea",
+        color="previsto_kg_ha",
+        color_continuous_scale="YlGn",
+        hover_name="municipio",
+        hover_data={
+            "previsto_kg_ha": ":,.0f",
+            "ultimo_real_kg_ha": ":,.0f",
+            "cod_municipio": False,
+        },
+        labels={
+            "previsto_kg_ha": "Prevista (kg/ha)",
+            "ultimo_real_kg_ha": f"Real em {ano_futuro - 1} (kg/ha)",
+        },
+    )
+    # Municípios sem previsão em cinza (e não buracos no mapa)
+    codigos_malha = {f["properties"]["codarea"] for f in malha["features"]}
+    sem_previsao = sorted(codigos_malha - set(futuro["cod_municipio"]))
+    fig.add_trace(go.Choropleth(
+        geojson=malha,
+        locations=sem_previsao,
+        featureidkey="properties.codarea",
+        z=[0] * len(sem_previsao),
+        colorscale=[[0, "lightgray"], [1, "lightgray"]],
+        showscale=False,
+        hovertemplate="Sem previsão<extra></extra>",
+    ))
+    fig.update_geos(fitbounds="locations", visible=False)
+    fig.update_layout(height=600, margin={"l": 0, "r": 0, "t": 30, "b": 0},
+                      separators=",.")
+    st.plotly_chart(fig)
+    st.caption(
+        "Cinza: municípios sem previsão (menos de 1.000 ha de soja colhida ou menos "
+        f"de 3 anos de histórico). A previsão usa dados de {ano_futuro - 1}, "
+        "que ainda são preliminares."
+    )
+
+    # 5. Real x previsto do município escolhido ----------------------------------
+    if municipio_escolhido == TODO_ESTADO:
+        st.caption("Escolha um município na barra lateral para comparar o real "
+                   "com o previsto, safra a safra.")
+        return
+
+    serie = backtest[
+        (backtest["municipio"] == municipio_escolhido)
+        & backtest["modelo"].isin([escolhido, "rf_direto"])
+    ]
+    if serie.empty:
+        st.caption(f"{municipio_escolhido} não tem previsões de soja "
+                   "(área ou histórico insuficientes).")
+        return
+
+    real = (
+        serie.drop_duplicates("ano")[["ano", "real_kg_ha"]]
+        .rename(columns={"real_kg_ha": "kg_ha"})
+        .assign(serie="Real")
+    )
+    previsto = serie[["ano", "modelo", "previsto_kg_ha"]].rename(
+        columns={"previsto_kg_ha": "kg_ha"}
+    )
+    previsto["serie"] = previsto.pop("modelo").map(nome)
+    partes = [real, previsto]
+
+    proximo = futuro[futuro["municipio"] == municipio_escolhido]
+    if not proximo.empty:
+        partes.append(pd.DataFrame({
+            "ano": [ano_futuro],
+            "kg_ha": [proximo["previsto_kg_ha"].iloc[0]],
+            "serie": [f"Previsão para {ano_futuro}"],
+        }))
+
+    fig = px.line(
+        pd.concat(partes, ignore_index=True),
+        x="ano",
+        y="kg_ha",
+        color="serie",
+        markers=True,
+        labels={"ano": "Safra", "kg_ha": "Produtividade (kg/ha)", "serie": ""},
+        title=f"Soja em {municipio_escolhido}: real × previsto",
+    )
+    fig.update_layout(separators=",.")
+    st.plotly_chart(fig)
 
 aba_ranking, aba_mapa, aba_evolucao, aba_comparacao, aba_previsoes, aba_sobre = st.tabs(
     ["🏆 Ranking", "🗺️ Mapa", "📈 Evolução", "🌱 Comparação entre culturas",
@@ -417,6 +606,9 @@ with aba_previsoes:
             f"Clusterização executada em {data}. Os perfis são agrupamentos "
             "estatísticos para análise, e não uma classificação oficial."
         )
+
+    st.divider()
+    secao_produtividade(municipio)
 
 # Aba 4: notas metodológicas
 with aba_sobre:
