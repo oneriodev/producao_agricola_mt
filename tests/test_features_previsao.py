@@ -8,7 +8,7 @@ Execute (raiz do projeto):
 import pandas as pd
 import pytest
 
-from src.ml.features import features_previsao
+from src.ml.features import features_previsao, features_proximo_ano
 
 
 def _producao(rendimentos: dict[int, float], area: float = 5_000) -> pd.DataFrame:
@@ -54,3 +54,11 @@ def test_area_pequena_vira_desconhecida():
     resultado = features_previsao(dados)
 
     assert resultado["rendimento_kg_ha"].isna().all()
+
+def test_proximo_ano_usa_o_ultimo_ano_como_lag1():
+    dados = features_previsao(_producao({2010: 1000, 2011: 2000, 2012: 3000}))
+    linha = features_proximo_ano(dados).iloc[0]
+
+    assert linha["ano"] == 2013
+    assert linha["rend_lag1"] == 3000
+    assert linha["rend_media3"] == pytest.approx(2000)

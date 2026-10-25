@@ -193,3 +193,28 @@ def features_previsao(
     serie["area_lag1"] = por_municipio["area_plantada_ha"].shift(1)
 
     return serie.reset_index()
+
+def features_proximo_ano(dados: pd.DataFrame) -> pd.DataFrame:
+    """Features do ano SEGUINTE ao último com dados (ex.: 2026).
+
+    Esse ano ainda não existe na base; as defasagens vêm do último ano:
+    lag1 = valor do último ano, lag2 = lag1 do último ano, e assim por diante.
+    Recebe a saída de features_previsao().
+    """
+    ultimo_ano = dados["ano"].max()
+    ultimo = dados[dados["ano"] == ultimo_ano]
+
+    proximo = pd.DataFrame({
+        "cod_municipio": ultimo["cod_municipio"],
+        "municipio": ultimo["municipio"],
+        "ano": ultimo_ano + 1,
+        "rend_lag1": ultimo[ALVO],
+        "rend_lag2": ultimo["rend_lag1"],
+        "rend_lag3": ultimo["rend_lag2"],
+        "area_lag1": ultimo["area_plantada_ha"],
+    })
+    proximo["rend_media3"] = proximo[["rend_lag1", "rend_lag2", "rend_lag3"]].mean(
+        axis=1, skipna=False
+    )
+    # Só municípios com todas as features (os demais não têm como ser previstos)
+    return proximo.dropna(subset=FEATURES_PREVISAO).reset_index(drop=True)

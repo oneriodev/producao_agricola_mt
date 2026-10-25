@@ -158,9 +158,13 @@ class ClusterMunicipio(Base):
 
 
 class PrevisaoProdutividade(Base):
-    """Produtividade prevista (kg/ha) por município, cultura e ano.
+    """Produtividade prevista (kg/ha) por município, cultura, ano e MODELO.
 
-    tipo = 'backtest': previsão de um ano passado (permite comparar com o real)
+    Formato "longo": uma linha por modelo, para comparar vários modelos
+    sem precisar mudar a tabela quando um modelo entra ou sai.
+    O valor real não é gravado aqui: ele já está na tabela producao.
+
+    tipo = 'backtest': previsão de um ano passado (comparável ao real)
     tipo = 'futuro':   previsão do próximo ano (ainda sem valor real)
     """
 
@@ -179,10 +183,9 @@ class PrevisaoProdutividade(Base):
         ForeignKey("produtos.cod_produto"), primary_key=True
     )
     ano_alvo: Mapped[int] = mapped_column(primary_key=True)
+    modelo: Mapped[str] = mapped_column(String(30), primary_key=True)
     tipo: Mapped[str] = mapped_column(String(10), nullable=False)
     previsto_kg_ha: Mapped[float] = mapped_column(nullable=False)
-    baseline_kg_ha: Mapped[float | None]  # "repetir o ano anterior"
-
 
 class MetricaModelo(Base):
     """Erro de cada modelo na validação, para comparar com o baseline."""
