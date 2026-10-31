@@ -1,0 +1,4 @@
+cod_cotacao;cod_item;cod_fornecedor;data_cotacao;validade;preco_original;moeda_original;unidade
+CSV-001;FERT-001;FORN-001;2026-10-29;2026-11-05;400,00;USD;t
+CSV-002;FERT-001;FORN-002;2026-10-29;2026-11-05;2250,00;BRL;t
+CSV-003;FERT-002;FORN-001;2026-10-29;2026-11-05;650,00;USD;t
