@@ -4,9 +4,6 @@ Painel da Produção Agrícola de Mato Grosso (Streamlit + Plotly).
 Lê os dados do PostgreSQL através do módulo src/queries.py e exibe:
 indicadores (KPIs), ranking de municípios, evolução por ano e
 comparação entre culturas.
-
-Como executar (a partir da raiz do projeto, com o banco no ar):
-    python -m streamlit run app/app.py
 """
 
 import json
@@ -51,14 +48,6 @@ NOMES_MODELOS = {
     "rf_direto": "Random Forest (valor direto)",
     "rf_variacao": "Random Forest (variação)",
 }
-
-# Precisa ser o PRIMEIRO comando do Streamlit no script
-st.set_page_config(
-    page_title="Produção Agrícola MT",
-    page_icon="🌾",
-    layout="wide",
-)
-
 
 # --- Funções auxiliares -----------------------------------------------------
 

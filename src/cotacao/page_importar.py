@@ -17,13 +17,6 @@ from src.cotacao.importar_cotacoes import (
     COLUNAS,
 )
 
-
-st.set_page_config(
-    page_title="Cotação de Insumos",
-    page_icon="📊",
-    layout="wide",
-)
-
 st.title("Cotação de Insumos Agrícolas")
 st.subheader("Importação de cotações")
 
